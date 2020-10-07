@@ -1,4 +1,4 @@
-package com.streamingVoice.controller;
+package com.streaming_voice.controller;
 
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;

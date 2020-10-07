@@ -64,14 +64,28 @@
         startRecording.onclick = function() {
 			startRecording.disabled = true;
 
-            const socket = new WebSocket('ws://localhost:8080/intent/websocket');
-			const stompClient = Stomp.over(socket);
-			stompClient.connect({}, function(){
-				console.log('Set Connection');
-			},
-			function (err) {
-				alert(err);
-			});
+            const socket = new WebSocket('ws://localhost:8080/streamingDetect/websocket');
+
+			socket.onopen = () => {
+			    console.log('Socket Connection is Opened');
+			}
+
+			socket.onclose = () => {
+			    console.log('Socket Connection is Closed');
+			}
+
+			socket.onmessage = () => {
+                const resultpreview = document.getElementById('results');
+                const intentInput = document.getElementById('intent');
+                const textInput = document.getElementById('queryText');
+
+              console.log(data);
+                if(data.queryResult){
+                    resultpreview.innerHTML += "" + data.queryResult.fulfillmentText;
+                    intentInput.value = data.queryResult.intent.displayName;
+                    textInput.value = "" + data.queryResult.queryText;
+                }
+			}
 
             navigator.getUserMedia(
 				{
@@ -103,7 +117,9 @@
 							fileReader.onload = function(event) {
 								let arrayBuffer = fileReader.result;
 								let arr = new Int16Array(arrayBuffer);
-								stompClient.send("/app/intent/stream", {}, arr);
+
+                                console.log('Send Data : ' + arr.length + ' Bytes');
+								socket.send(arr);
 							};
 						}
 					});
@@ -142,10 +158,6 @@
 		function stopRecordingCallback(){
 			docuemnt.getElementById('fullAudioSection').append(getAudioBlob(recordAudio.getBlob()));
 		}
-
-        const resultpreview = document.getElementById('results');
-        const intentInput = document.getElementById('intent');
-        const textInput = document.getElementById('queryText');
     });
 </script>
 </body>
