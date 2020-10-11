@@ -6,16 +6,19 @@ import com.google.api.gax.rpc.BidiStream;
 import com.google.auth.oauth2.GoogleCredentials;
 import com.google.auth.oauth2.ServiceAccountCredentials;
 import com.google.cloud.dialogflow.v2.*;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import com.google.protobuf.ByteString;
+import com.google.protobuf.util.JsonFormat;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.web.socket.BinaryMessage;
 import org.springframework.web.socket.CloseStatus;
+import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.BinaryWebSocketHandler;
 
-import java.io.FileInputStream;
-import java.io.InputStream;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -27,13 +30,13 @@ public class StreamingDetectHandler extends BinaryWebSocketHandler {
 
     @Override
     public void afterConnectionEstablished(WebSocketSession socketSession) throws Exception {
-        logger.info(socketSession.getId() + "Connection Establish Start");
+        logger.info(String.format("[%s] Connection Establish Start", socketSession.getId()));
 
         super.afterConnectionEstablished(socketSession);
 
         // Read Json by InputStream
-        InputStream inputStream = new FileInputStream("");
-        GoogleCredentials credentials = GoogleCredentials.fromStream(inputStream);
+        ClassPathResource cpr = new ClassPathResource("dialogflow_credentials.json");
+        GoogleCredentials credentials = GoogleCredentials.fromStream(cpr.getInputStream());
         String projectId = ((ServiceAccountCredentials)credentials).getProjectId();
         String dialogflowSessionId = UUID.randomUUID().toString();
 
@@ -73,44 +76,72 @@ public class StreamingDetectHandler extends BinaryWebSocketHandler {
 
         bidiStreamMap.put(socketSession, bidiStream);
 
-        logger.info(socketSession.getId() + "Connection Establish End");
+        logger.info(String.format("[%s] Connection Establish End", socketSession.getId()));
     }
 
     @Override
     public void afterConnectionClosed(WebSocketSession socketSession, CloseStatus status) throws Exception {
-        logger.info(socketSession.getId() + "Connection Close Start");
+        logger.info(String.format("[%s] Connection Close Start", socketSession.getId()));
 
         super.afterConnectionClosed(socketSession, status);
+        bidiStreamMap.remove(socketSession);
 
+        logger.info(String.format("[%s] Connection Close End", socketSession.getId()));
+    }
+
+    @Override
+    protected void handleBinaryMessage(WebSocketSession socketSession, BinaryMessage message) throws Exception {
+        logger.info(String.format("[%s] Handle Binary Message Start", socketSession.getId()));
+
+        if(message.getPayloadLength() == 3){
+            String msg = new String(message.getPayload().array());
+            closeStream(socketSession);
+        }
+        else{
+            BidiStream<StreamingDetectIntentRequest, StreamingDetectIntentResponse> bidiStream
+                    = bidiStreamMap.get(socketSession);
+
+            bidiStream.send(StreamingDetectIntentRequest.newBuilder()
+                    .setInputAudio(ByteString.copyFrom(message.getPayload().array()))
+                    .build());
+        }
+
+        logger.info(String.format("[%s] Handle Binary Message End", socketSession.getId()));
+    }
+
+    private void closeStream(WebSocketSession socketSession) throws Exception{
         BidiStream<StreamingDetectIntentRequest, StreamingDetectIntentResponse> bidiStream
                 = bidiStreamMap.get(socketSession);
 
         // Tell the service you are done sending data
         bidiStream.closeSend();
 
+        StreamingDetectIntentResponse lastResponse = null;
         for (StreamingDetectIntentResponse response : bidiStream) {
+            lastResponse = response;
+
             QueryResult queryResult = response.getQueryResult();
             logger.info("====================");
-            logger.info("Intent Display Name: '{0}'", queryResult.getIntent().getDisplayName());
-            logger.info("Query Text: '{0}'", queryResult.getQueryText());
-            logger.info("Detected Intent: {0} (confidence: {1})", queryResult.getIntent().getDisplayName(), queryResult.getIntentDetectionConfidence());
-            logger.info("Fulfillment Text: '{0}'", queryResult.getFulfillmentText());
+            logger.info(String.format("TransScript: '%s'", response.getRecognitionResult().getTranscript()));
+            logger.info(String.format("Intent Display Name: '%s'", queryResult.getIntent().getDisplayName()));
+            logger.info(String.format("Query Text: '%s'", queryResult.getQueryText()));
+            logger.info(String.format("Detected Intent: %s (confidence: %f)", queryResult.getIntent().getDisplayName(), queryResult.getIntentDetectionConfidence()));
+            logger.info(String.format("Fulfillment Text: '%s'", queryResult.getFulfillmentText()));
         }
 
-        logger.info(socketSession.getId() + "Connection Close End");
-    }
+        if(lastResponse != null){
+            StringBuilder sb = new StringBuilder();
+            JsonFormat.printer().appendTo(lastResponse, sb);
 
-    @Override
-    protected void handleBinaryMessage(WebSocketSession socketSession, BinaryMessage message) throws Exception {
-        logger.info(String.format("{0} Handle Binary Message Start"), socketSession.getId());
+            JsonParser jsonParser = new JsonParser();
+            JsonObject jsonObj = (JsonObject) jsonParser.parse(sb.toString());
 
-        BidiStream<StreamingDetectIntentRequest, StreamingDetectIntentResponse> bidiStream
-                = bidiStreamMap.get(socketSession);
+            socketSession.sendMessage(new TextMessage(jsonObj.toString()));
+        }
+        else{
+            socketSession.sendMessage(new TextMessage("Response is Empty"));
+        }
 
-        bidiStream.send(StreamingDetectIntentRequest.newBuilder()
-                .setInputAudio(ByteString.copyFrom(message.getPayload().array()))
-                .build());
-
-        logger.info(String.format("{0} Handle Binary Message End"), socketSession.getId());
+        socketSession.close();
     }
 }

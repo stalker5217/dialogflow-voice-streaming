@@ -21,7 +21,6 @@
     <link rel="stylesheet" href="https://code.getmdl.io/1.3.0/material.indigo-pink.min.css">
     <script src="https://www.WebRTC-Experiment.com/RecordRTC.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.5.0/sockjs.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
     <script src="//cdnjs.cloudflare.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
 </head>
 
@@ -64,28 +63,34 @@
         startRecording.onclick = function() {
 			startRecording.disabled = true;
 
-            const socket = new WebSocket('ws://localhost:8080/streamingDetect/websocket');
+            socket = new WebSocket('ws://localhost:8080/streamingDetect/websocket');
 
 			socket.onopen = () => {
 			    console.log('Socket Connection is Opened');
-			}
+			};
 
 			socket.onclose = () => {
 			    console.log('Socket Connection is Closed');
-			}
+			};
 
-			socket.onmessage = () => {
-                const resultpreview = document.getElementById('results');
-                const intentInput = document.getElementById('intent');
-                const textInput = document.getElementById('queryText');
+			socket.onmessage = (messageEvent) => {
+			    const jsonData = JSON.parse(messageEvent.data);
 
-              console.log(data);
-                if(data.queryResult){
-                    resultpreview.innerHTML += "" + data.queryResult.fulfillmentText;
-                    intentInput.value = data.queryResult.intent.displayName;
-                    textInput.value = "" + data.queryResult.queryText;
+			    if(typeof jsonData !== 'object'){
+			        console.log(jsonData);
+			        return;
+			    }
+
+                if(jsonData.queryResult){
+                    const resultpreview = document.getElementById('results');
+                    const intentInput = document.getElementById('intent');
+                    const textInput = document.getElementById('queryText');
+
+                    resultpreview.innerHTML += "" + jsonData.queryResult.fulfillmentText;
+                    intentInput.value = jsonData.queryResult.intent.displayName;
+                    textInput.value = "" + jsonData.queryResult.queryText;
                 }
-			}
+			};
 
             navigator.getUserMedia(
 				{
@@ -105,7 +110,7 @@
 						// get intervals based blobs
 						// value in milliseconds
 						// as you might not want to make detect calls every seconds
-						timeSlice: 3000,
+						timeSlice: 2000,
 
 						//2)
 						// as soon as the stream is available
@@ -147,17 +152,29 @@
         // on stop button handler
         stopRecording.onclick = function() {
 			// recording stopped
-			recordAudio.startRecording(stopRecordingCallback);
+			recordAudio.stopRecording(stopRecordingCallback);
 
             startRecording.disabled = false;
 			stopRecording.disabled = true;
 
-			socket.close();
+			sendEof();
 		};
 
 		function stopRecordingCallback(){
-			docuemnt.getElementById('fullAudioSection').append(getAudioBlob(recordAudio.getBlob()));
+			document.getElementById('fullAudioSection').append(getAudioBlob(recordAudio.getBlob()));
 		}
+
+		function sendEof(){
+		    const eofString = 'eof';
+		    const arrBuf = new ArrayBuffer(eofString.length);
+		    const arr = new Int8Array(arrBuf);
+
+		    for(let i = 0 ; i < eofString.length ; i++){
+		        arr[i] = eofString.charCodeAt(i);
+		    }
+
+	        socket.send(arr);
+        }
     });
 </script>
 </body>
